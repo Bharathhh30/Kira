@@ -17,30 +17,8 @@ Stack
 - TypeScript
 - Vite
 - Tailwind CSS
-- Biome
-
-Before completing any frontend task:
-
-1. Run
-
-npm run format
-
-2. Run
-
-npm run check
-
-3. Run
-
-npm run build
-
-Only finish the task if all commands succeed.
-
-Do not
-
-- use `any`
-- use non-null assertions (`!`)
-- ignore Biome errors
-- disable lint rules
+- Zustand
+- Shadcn
 
 Always
 
@@ -57,6 +35,15 @@ Stack
 - Python 3.13
 - Ruff
 - Pytest
+- Pydantic
+- Sqlalchemy
+- Postgres
+- Docker
+- Redis
+- Alembic
+- Langchain
+- Langgraph
+- Livekit agents
 
 Before completing any backend task:
 
@@ -82,3 +69,37 @@ A task is complete only if
 - tests pass
 - no new warnings introduced
 - code follows project architecture
+
+## Architecture Rules
+
+- This project follows Clean Architecture.
+- Business logic belongs inside services.
+- Routes should remain thin.
+- Agents never access the database directly.
+- All persistence happens through repositories.
+
+## Coding Rules
+
+- No business logic in routes.
+- No SQL inside endpoints.
+- Use async everywhere possible.
+- Always type hint.
+- Use Pydantic schemas.
+- One responsibility per service.
+
+## Database Rules
+
+- Never delete interviews.
+- Soft delete users.
+- Always use UUID.
+- Never store passwords.
+- Refresh tokens must be hashed.
+
+## Frontend Rules
+
+- React Query for server state.
+- Zustand for local state.
+- No API calls inside components.
+- Use hooks.
+- UI is dumb.
+- Business logic lives in hooks.
