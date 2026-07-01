@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from app.models.base import Base
 from app.models.user import User  # noqa: F401
 from app.models.token import RefreshToken  # noqa: F401
+from app.models.resume import Resume  # noqa: F401
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides
