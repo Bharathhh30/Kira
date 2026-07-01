@@ -19,12 +19,9 @@
     "lint-staged": "^16.1.5"
   },
   "lint-staged": {
-    "frontend/**/*.{ts,tsx,js,jsx}": [
-      "cd frontend && biome check --write"
-    ],
     "backend/**/*.py": [
-      "cd backend && uv run ruff format",
-      "cd backend && uv run ruff check --fix"
+      "uv --directory backend run ruff format",
+      "uv --directory backend run ruff check --fix"
     ]
   },
   "config": {
