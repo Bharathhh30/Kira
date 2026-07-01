@@ -1,5 +1,4 @@
 "use client";
-import React from "react";
 import { SquigglyText } from "@/components/ui/squiggly-text";
 
 export default function SquigglyTextDemo() {
