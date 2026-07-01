@@ -1,16 +1,28 @@
-from fastapi import APIRouter, Depends, Response, Cookie
+from fastapi import (
+    APIRouter,
+    Depends,
+    Response,
+    Cookie,
+    BackgroundTasks,
+    UploadFile,
+    HTTPException,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 from app.core import exceptions, security
 from app.core.config import settings
 from app.core.database import get_db_session
 from app.models.user import User
+from app.models.resume import Resume
 from app.repositories.token import RefreshTokenRepository
 from app.repositories.user import UserRepository
 from app.schemas.token import AccessTokenResponse
 from app.schemas.user import UserCreate, UserLogin, UserResponse
+from app.schemas.resume import ResumeResponse
 from app.services.auth import AuthService
+from app.services.parser import ResumeParserService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security_scheme = HTTPBearer()
@@ -129,3 +141,37 @@ async def logout(
 async def me(current_user: User = Depends(get_current_user)):
     """Retrieve the current logged-in user profile."""
     return current_user
+
+
+@router.post("/resume", status_code=202)
+async def upload_resume(
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a resume PDF, processing it asynchronously in the background."""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    file_bytes = await file.read()
+    background_tasks.add_task(
+        ResumeParserService.parse_resume_background,
+        current_user.id,
+        file_bytes,
+        file.filename,
+    )
+    return {"message": "Resume upload accepted. Processing in background."}
+
+
+@router.get("/resume", response_model=ResumeResponse)
+async def get_resume(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Retrieve the current user's parsed resume."""
+    stmt = select(Resume).where(Resume.user_id == current_user.id)
+    result = await db.execute(stmt)
+    db_resume = result.scalar_one_or_none()
+    if not db_resume:
+        raise HTTPException(status_code=404, detail="No resume has been uploaded yet.")
+    return db_resume

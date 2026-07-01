@@ -38,6 +38,7 @@ async def db_session(
     """Provide a database session after truncating tables to ensure test isolation."""
     async with session_maker() as session:
         # Clear database tables before each test
+        await session.execute(text("TRUNCATE TABLE resumes CASCADE;"))
         await session.execute(text("TRUNCATE TABLE refresh_tokens CASCADE;"))
         await session.execute(text("TRUNCATE TABLE users CASCADE;"))
         await session.commit()

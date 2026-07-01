@@ -153,3 +153,138 @@ async def test_logout_user(client: AsyncClient):
     # Try to refresh again, should be denied since cookie was revoked/cleared
     refresh_resp = await client.post("/api/auth/refresh")
     assert refresh_resp.status_code == 401
+
+
+async def test_upload_resume_success(client: AsyncClient):
+    # Register & Login
+    await client.post(
+        "/api/auth/register",
+        json={
+            "email": "uploader@example.com",
+            "name": "Uploader User",
+            "password": "securepassword123",
+        },
+    )
+    login_resp = await client.post(
+        "/api/auth/login",
+        json={"email": "uploader@example.com", "password": "securepassword123"},
+    )
+    access_token = login_resp.json()["access_token"]
+
+    # Upload mock PDF file
+    import io
+
+    pdf_file = io.BytesIO(b"%PDF-1.4 mock content")
+    response = await client.post(
+        "/api/auth/resume",
+        headers={"Authorization": f"Bearer {access_token}"},
+        files={"file": ("resume.pdf", pdf_file, "application/pdf")},
+    )
+    assert response.status_code == 202
+    assert "accepted" in response.json()["message"]
+
+
+async def test_upload_resume_invalid_format(client: AsyncClient):
+    # Register & Login
+    await client.post(
+        "/api/auth/register",
+        json={
+            "email": "invalid_uploader@example.com",
+            "name": "Invalid Uploader",
+            "password": "securepassword123",
+        },
+    )
+    login_resp = await client.post(
+        "/api/auth/login",
+        json={
+            "email": "invalid_uploader@example.com",
+            "password": "securepassword123",
+        },
+    )
+    access_token = login_resp.json()["access_token"]
+
+    # Upload TXT file (invalid)
+    import io
+
+    txt_file = io.BytesIO(b"raw text content")
+    response = await client.post(
+        "/api/auth/resume",
+        headers={"Authorization": f"Bearer {access_token}"},
+        files={"file": ("resume.txt", txt_file, "text/plain")},
+    )
+    assert response.status_code == 400
+    assert "Only PDF files are supported." in response.json()["detail"]
+
+
+async def test_get_resume_not_found(client: AsyncClient):
+    # Register & Login
+    await client.post(
+        "/api/auth/register",
+        json={
+            "email": "no_resume@example.com",
+            "name": "No Resume User",
+            "password": "securepassword123",
+        },
+    )
+    login_resp = await client.post(
+        "/api/auth/login",
+        json={"email": "no_resume@example.com", "password": "securepassword123"},
+    )
+    access_token = login_resp.json()["access_token"]
+
+    response = await client.get(
+        "/api/auth/resume",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 404
+    assert "No resume has been uploaded yet." in response.json()["detail"]
+
+
+async def test_get_resume_success(client: AsyncClient):
+    # Register & Login
+    await client.post(
+        "/api/auth/register",
+        json={
+            "email": "resume@example.com",
+            "name": "Resume User",
+            "password": "securepassword123",
+        },
+    )
+    login_resp = await client.post(
+        "/api/auth/login",
+        json={"email": "resume@example.com", "password": "securepassword123"},
+    )
+    access_token = login_resp.json()["access_token"]
+
+    # Insert a resume record directly in the DB
+    from app.core.database import async_session_maker
+    from app.models.user import User
+    from app.models.resume import Resume
+    from sqlalchemy import select
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(User).filter_by(email="resume@example.com")
+        )
+        user = result.scalar_one()
+
+        resume = Resume(
+            user_id=user.id,
+            resume_json={
+                "personal": {
+                    "name": "Resume User",
+                    "email": "resume@example.com",
+                }
+            },
+        )
+        session.add(resume)
+        await session.commit()
+
+    # Query GET /api/auth/resume
+    response = await client.get(
+        "/api/auth/resume",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resume_json"]["personal"]["name"] == "Resume User"

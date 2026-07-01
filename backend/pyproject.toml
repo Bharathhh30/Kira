@@ -13,6 +13,8 @@ dependencies = [
     "bcrypt>=4.2.1",
     "alembic>=1.14.0",
     "email-validator>=2.0.0",
+    "pymupdf>=1.25.1",
+    "pdfplumber>=0.11.0",
 ]
 
 [dependency-groups]

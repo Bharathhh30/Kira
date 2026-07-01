@@ -1,12 +1,64 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/Header";
 import { SquigglyText } from "@/components/ui/squiggly-text";
 import { EncryptedText } from "@/components/ui/encrypted-text";
+import { api } from "@/lib/api";
 
 export default function Landing() {
   const { user, isLoading } = useAuth();
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Check if current user has a parsed resume in the DB
+  const { data: hasResume, refetch: refetchResumeStatus } = useQuery<boolean>({
+    queryKey: ["resume-status"],
+    queryFn: async () => {
+      const res = await api.get("/auth/resume");
+      return res.status === 200; // true if resume exists, false if 404
+    },
+    enabled: !!user,
+  });
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadError("Only PDF files are supported.");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+    setUploadMessage(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await api.post("/auth/resume", undefined, { body: formData });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Failed to upload resume.");
+      }
+      setUploadMessage(
+        "Resume upload accepted! We are parsing your profile in the background. Check your Profile page in a few seconds."
+      );
+      // Wait a moment and check status again
+      setTimeout(() => {
+        refetchResumeStatus();
+      }, 4000);
+    } catch (err: any) {
+      setUploadError(err.message || "An error occurred during upload.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white text-slate-900 flex flex-col font-sans">
@@ -45,15 +97,93 @@ export default function Landing() {
               </div>
             </div>
 
-            <div className="flex justify-center p-8 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="text-center flex flex-col gap-4 max-w-md items-center">
-                <h3 className="text-lg font-semibold text-slate-900">Ready to start practicing?</h3>
-                <p className="text-sm text-slate-500">
-                  Choose your tech topics, upload your resume, and conduct a voice-interactive, adaptive mock interview.
-                </p>
-                <Button className="w-fit bg-slate-900 text-white hover:bg-slate-800" size="lg">
-                  Start Practice Interview
-                </Button>
+            <div className="grid gap-6 md:grid-cols-2 mt-2">
+              {/* Card 1: Resume Upload / Status */}
+              <div className="p-6 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between gap-4">
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-lg font-bold text-slate-900">AI Profile Parser</h3>
+                  {hasResume ? (
+                    <p className="text-sm text-slate-500 leading-relaxed">
+                      ✓ Your resume has been parsed successfully! We have automatically loaded your skills, experiences, projects, and coding ratings into your Profile.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-500 leading-relaxed">
+                      Upload your technical resume to auto-generate a structured profile. Our parser extracts your work history, projects, and coding ratings to customize your AI mock interviews.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {uploadError && (
+                    <div className="p-3 text-xs text-red-700 rounded-lg bg-red-50 border border-red-200">
+                      {uploadError}
+                    </div>
+                  )}
+                  {uploadMessage && (
+                    <div className="p-3 text-xs text-slate-800 rounded-lg bg-slate-100 border border-slate-200">
+                      {uploadMessage}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    {hasResume ? (
+                      <>
+                        <Link to="/profile">
+                          <Button className="bg-slate-900 text-white hover:bg-slate-800" size="sm">
+                            View Profile
+                          </Button>
+                        </Link>
+                        <label htmlFor="resume-file-input">
+                          <input
+                            type="file"
+                            id="resume-file-input"
+                            className="hidden"
+                            accept=".pdf"
+                            onChange={handleFileChange}
+                            disabled={isUploading}
+                          />
+                          <Button asChild variant="outline" size="sm" className="border-slate-300 hover:bg-slate-100 cursor-pointer">
+                            <span>Update Resume</span>
+                          </Button>
+                        </label>
+                      </>
+                    ) : (
+                      <label htmlFor="resume-file-input">
+                        <input
+                          type="file"
+                          id="resume-file-input"
+                          className="hidden"
+                          accept=".pdf"
+                          onChange={handleFileChange}
+                          disabled={isUploading}
+                        />
+                        <Button asChild className="bg-slate-900 text-white hover:bg-slate-800 cursor-pointer" size="sm">
+                          <span>
+                            {isUploading ? "Uploading & Parsing..." : "Upload Resume (PDF)"}
+                          </span>
+                        </Button>
+                      </label>
+                    )}
+                    {isUploading && (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Practice Interview */}
+              <div className="p-6 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between gap-4">
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-lg font-bold text-slate-900">Adaptive Mock Interviews</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Practice voice-interactive tech interviews. The AI dynamically adapts difficulty, probes your code designs, and checks your problem solving steps based on your profile background.
+                  </p>
+                </div>
+                <div>
+                  <Button className="w-fit bg-slate-900 text-white hover:bg-slate-800" size="sm">
+                    Start Mock Session
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
