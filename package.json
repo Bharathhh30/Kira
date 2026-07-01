@@ -19,8 +19,12 @@
     "lint-staged": "^16.1.5"
   },
   "lint-staged": {
-    "frontend/**/*.{js,jsx,ts,tsx,json,css,md}": [
-      "cd frontend && npx @biomejs/biome check --write"
+    "frontend/**/*.{ts,tsx,js,jsx}": [
+      "cd frontend && biome check --write"
+    ],
+    "backend/**/*.py": [
+      "cd backend && uv run ruff format",
+      "cd backend && uv run ruff check --fix"
     ]
   },
   "config": {
