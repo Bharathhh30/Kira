@@ -59,8 +59,9 @@ async def test_login_user(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
-    assert "refresh_token" in data
+    assert "refresh_token" not in data  # No longer in response body!
     assert data["token_type"] == "bearer"
+    assert "refresh_token" in response.cookies  # Set in HttpOnly cookie!
 
 
 async def test_login_invalid_credentials(client: AsyncClient):
@@ -114,17 +115,20 @@ async def test_refresh_token(client: AsyncClient):
             "password": "securepassword123",
         },
     )
-    refresh_token = login_resp.json()["refresh_token"]
+    assert "refresh_token" in login_resp.cookies
+    old_refresh = login_resp.cookies.get("refresh_token")
 
-    # Refresh
-    response = await client.post(
-        "/api/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    # Refresh (HTTPX client preserves cookie jar, but we can also check rotation)
+    response = await client.post("/api/auth/refresh")
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
-    assert "refresh_token" in data
-    assert data["refresh_token"] != refresh_token  # rotated!
+    assert "refresh_token" not in data
+
+    # New cookie set, rotated!
+    assert "refresh_token" in response.cookies
+    new_refresh = response.cookies.get("refresh_token")
+    assert new_refresh != old_refresh
 
 
 async def test_logout_user(client: AsyncClient):
@@ -137,20 +141,15 @@ async def test_logout_user(client: AsyncClient):
             "password": "securepassword123",
         },
     )
-    login_resp = await client.post(
+    await client.post(
         "/api/auth/login",
         json={"email": "logout@example.com", "password": "securepassword123"},
     )
-    refresh_token = login_resp.json()["refresh_token"]
 
     # Logout
-    logout_resp = await client.post(
-        "/api/auth/logout", json={"refresh_token": refresh_token}
-    )
+    logout_resp = await client.post("/api/auth/logout")
     assert logout_resp.status_code == 204
 
-    # Try to refresh again
-    refresh_resp = await client.post(
-        "/api/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    # Try to refresh again, should be denied since cookie was revoked/cleared
+    refresh_resp = await client.post("/api/auth/refresh")
     assert refresh_resp.status_code == 401

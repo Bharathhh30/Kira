@@ -1,13 +1,14 @@
-import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, Cookie
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
 from app.core import exceptions, security
+from app.core.config import settings
 from app.core.database import get_db_session
 from app.models.user import User
 from app.repositories.token import RefreshTokenRepository
 from app.repositories.user import UserRepository
-from app.schemas.token import Token, TokenRefreshRequest
+from app.schemas.token import AccessTokenResponse
 from app.schemas.user import UserCreate, UserLogin, UserResponse
 from app.services.auth import AuthService
 
@@ -57,31 +58,71 @@ async def register(
     return await auth_service.register(user_in)
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=AccessTokenResponse)
 async def login(
+    response: Response,
     login_in: UserLogin,
     auth_service: AuthService = Depends(get_auth_service),
 ):
-    """Log in with email and password, returning tokens."""
-    return await auth_service.login(login_in)
+    """Log in with email and password, returning access token and setting HttpOnly cookie."""
+    token_data = await auth_service.login(login_in)
+    response.set_cookie(
+        key="refresh_token",
+        value=token_data.refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/auth",
+    )
+    return AccessTokenResponse(
+        access_token=token_data.access_token,
+        token_type=token_data.token_type,
+    )
 
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=AccessTokenResponse)
 async def refresh(
-    refresh_in: TokenRefreshRequest,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """Refresh the access and refresh tokens using token rotation."""
-    return await auth_service.refresh_tokens(refresh_in.refresh_token)
+    if not refresh_token:
+        raise exceptions.CredentialsException("Missing refresh token")
+
+    token_data = await auth_service.refresh_tokens(refresh_token)
+    response.set_cookie(
+        key="refresh_token",
+        value=token_data.refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/auth",
+    )
+    return AccessTokenResponse(
+        access_token=token_data.access_token,
+        token_type=token_data.token_type,
+    )
 
 
 @router.post("/logout", status_code=204)
 async def logout(
-    refresh_in: TokenRefreshRequest,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """Revoke a refresh token upon user logout."""
-    await auth_service.logout(refresh_in.refresh_token)
+    if refresh_token:
+        await auth_service.logout(refresh_token)
+    response.delete_cookie(
+        key="refresh_token",
+        path="/api/auth",
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+    )
 
 
 @router.get("/me", response_model=UserResponse)
