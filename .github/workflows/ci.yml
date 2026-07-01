@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - dev
+      - '**'
 
 jobs:
   frontend:
