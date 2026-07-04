@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { EncryptedText } from "@/components/ui/encrypted-text";
 import { SquigglyText } from "@/components/ui/squiggly-text";
 import { useAuth } from "@/hooks/useAuth";
+import { useInterview } from "@/hooks/useInterview";
 import { api } from "@/lib/api";
 
 export default function Landing() {
@@ -13,6 +14,17 @@ export default function Landing() {
 	const [isUploading, setIsUploading] = useState(false);
 	const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 	const [uploadError, setUploadError] = useState<string | null>(null);
+	const navigate = useNavigate();
+	const { startInterview } = useInterview();
+
+	const handleStartInterview = async () => {
+		try {
+			const session = await startInterview.mutateAsync({ mode: "resume" });
+			navigate(`/interview/${session.id}`);
+		} catch (err: any) {
+			setUploadError(err.message || "Failed to start interview session.");
+		}
+	};
 
 	// Check if current user has a parsed resume in the DB
 	const { data: hasResume, refetch: refetchResumeStatus } = useQuery<boolean>({
@@ -219,10 +231,14 @@ export default function Landing() {
 								</div>
 								<div>
 									<Button
-										className="w-fit bg-slate-900 text-white hover:bg-slate-800"
+										className="w-fit bg-slate-900 text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
 										size="sm"
+										onClick={handleStartInterview}
+										disabled={startInterview.isPending || !hasResume}
 									>
-										Start Mock Session
+										{startInterview.isPending
+											? "Starting..."
+											: "Start Mock Session"}
 									</Button>
 								</div>
 							</div>

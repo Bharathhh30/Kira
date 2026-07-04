@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Interview from "./pages/Interview";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
@@ -23,6 +24,7 @@ export default function App() {
 					<Route path="/login" element={<Login />} />
 					<Route path="/register" element={<Register />} />
 					<Route path="/profile" element={<Profile />} />
+					<Route path="/interview/:id" element={<Interview />} />
 				</Routes>
 			</BrowserRouter>
 		</QueryClientProvider>
