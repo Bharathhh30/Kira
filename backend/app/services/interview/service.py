@@ -1,7 +1,11 @@
 import uuid
+import logging
+import httpx
+import json
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
 from app.models.interview import Interview
 from app.models.resume import Resume
 from app.repositories.interview import InterviewRepository
@@ -81,7 +85,7 @@ class InterviewService:
                 answer=h.get("answer"),
                 score=h.get("score"),
                 feedback=h.get("feedback"),
-                # Parse timestamp if exists, otherwise handled by default factory
+                granular_scores=h.get("granular_scores"),
             )
             for h in db_interview.history
         ]
@@ -98,13 +102,19 @@ class InterviewService:
             remaining_time=db_interview.remaining_time,
             interview_mode=db_interview.interview_mode,
             is_completed=db_interview.is_completed,
+            report=db_interview.report,
         )
 
         # 4. Process response using InterviewManager
         manager = InterviewManager()
-        manager.process_answer(state, answer)
+        await manager.process_answer(state, answer)
 
-        # 5. Map updated fields back to DB
+        # 5. Generate final report if completed
+        report_data = db_interview.report
+        if state.is_completed and not report_data:
+            report_data = await self.generate_final_report(state)
+
+        # 6. Map updated fields back to DB
         updated_fields = {
             "current_topic": state.current_topic,
             "remaining_topics": state.remaining_topics,
@@ -113,9 +123,116 @@ class InterviewService:
             "history": [h.model_dump(mode="json") for h in state.history],
             "remaining_time": state.remaining_time,
             "is_completed": state.is_completed,
+            "report": report_data,
         }
 
         return await self.interview_repo.update(db_interview, updated_fields)
+
+    async def generate_final_report(self, state: InterviewState) -> dict:
+        """
+        Generates a summary final performance report by calling the Gemini API.
+        """
+        logger = logging.getLogger("kira-interview-report")
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not configured. Generating static fallback report.")
+            return self._generate_fallback_report(state)
+
+        # Build prompt listing the entire history of questions, answers, and scores
+        history_text = ""
+        for idx, entry in enumerate(state.history):
+            history_text += (
+                f"Exchange #{idx+1}:\n"
+                f"Question: {entry.question}\n"
+                f"Answer: {entry.answer or 'N/A'}\n"
+                f"Score: {entry.score or 0.0}\n"
+                f"Feedback: {entry.feedback or ''}\n\n"
+            )
+
+        prompt = (
+            "You are an expert technical interviewer compiling a final performance report for a mock interview.\n\n"
+            "Here is the dialogue history and feedback for each question-answer exchange:\n"
+            f"{history_text}\n"
+            "Based on the dialogue history, compile a comprehensive evaluation report.\n"
+            "You must return a valid JSON object matching the following structure:\n"
+            "{\n"
+            "  \"summary\": \"Overall performance summary (2-3 sentences summarizing key metrics, domain knowledge, and highlights).\",\n"
+            "  \"strengths\": [\n"
+            "    \"Strength 1 (specific detail from answers)\",\n"
+            "    \"Strength 2\"\n"
+            "  ],\n"
+            "  \"weaknesses\": [\n"
+            "    \"Area for improvement 1 (specific gap or detail that was missed)\",\n"
+            "    \"Area for improvement 2\"\n"
+            "  ],\n"
+            "  \"granular_averages\": {\n"
+            "    \"communication\": float, // Average communication score from 0.0 to 1.0\n"
+            "    \"accuracy\": float, // Average accuracy score from 0.0 to 1.0\n"
+            "    \"confidence\": float, // Average confidence score from 0.0 to 1.0\n"
+            "    \"completeness\": float // Average completeness score from 0.0 to 1.0\n"
+            "  }\n"
+            "}"
+        )
+
+        models = [settings.GEMINI_MODEL, "gemini-2.5-flash"]
+        if settings.GEMINI_MODEL not in models:
+            models.insert(0, settings.GEMINI_MODEL)
+
+        payload = {
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+            },
+        }
+
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    response = await client.post(url, json=payload)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                        parsed = json.loads(raw_text.strip())
+                        return parsed
+            except Exception as e:
+                logger.exception(f"Failed to generate report with model {model}: {e}")
+
+        logger.warning("All Gemini report models failed. Generating static fallback report.")
+        return self._generate_fallback_report(state)
+
+    def _generate_fallback_report(self, state: InterviewState) -> dict:
+        # Calculate averages locally
+        comm_scores = []
+        acc_scores = []
+        conf_scores = []
+        comp_scores = []
+        
+        for entry in state.history:
+            if entry.granular_scores:
+                comm_scores.append(entry.granular_scores.communication)
+                acc_scores.append(entry.granular_scores.accuracy)
+                conf_scores.append(entry.granular_scores.confidence)
+                comp_scores.append(entry.granular_scores.completeness)
+                
+        avg_comm = sum(comm_scores) / len(comm_scores) if comm_scores else 0.8
+        avg_acc = sum(acc_scores) / len(acc_scores) if acc_scores else 0.8
+        avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 0.8
+        avg_comp = sum(comp_scores) / len(comp_scores) if comp_scores else 0.8
+
+        return {
+            "summary": "The candidate has completed the mock interview. Good performance overall across all syllabus topics.",
+            "strengths": ["Demonstrates basic knowledge of the selected topics", "Completed the interview within the time limit"],
+            "weaknesses": ["Could provide more detailed examples in technical responses"],
+            "granular_averages": {
+                "communication": avg_comm,
+                "accuracy": avg_acc,
+                "confidence": avg_conf,
+                "completeness": avg_comp
+            }
+        }
 
     async def get_interview_state(
         self, interview_id: uuid.UUID, user_id: uuid.UUID

@@ -33,6 +33,7 @@ class Interview(Base):
         String(50), default="resume", nullable=False
     )
     is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -3,6 +3,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.resume import Resume
 from app.models.user import User
 from app.core.security import hash_password
+from unittest.mock import patch
+from app.services.interview.evaluator import EvaluationResult, GranularScores
+
+async def mock_evaluate(answer, current_question):
+    if len(answer) < 20:
+        return EvaluationResult(
+            score=0.4,
+            follow_up=True,
+            reason="Answer is too short",
+            move_next=False,
+            granular_scores=GranularScores(communication=0.5, accuracy=0.4, confidence=0.4, completeness=0.3)
+        )
+    else:
+        return EvaluationResult(
+            score=0.8,
+            follow_up=False,
+            reason="Answer is sufficient",
+            move_next=True,
+            granular_scores=GranularScores(communication=0.8, accuracy=0.8, confidence=0.8, completeness=0.8)
+        )
 
 
 async def create_test_user_and_resume(
@@ -73,53 +93,54 @@ async def test_interview_full_flow(client: AsyncClient, db_session: AsyncSession
     user, _ = await create_test_user_and_resume(db_session, email)
     headers = await get_auth_headers(client, email)
 
-    # 1. Start Interview
-    response = await client.post(
-        "/api/interview/start",
-        json={"interview_mode": "resume"},
-        headers=headers,
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert "id" in data
-    interview_id = data["id"]
-    assert data["current_topic"] == "Python"
-    assert data["follow_up_count"] == 0
-    assert not data["is_completed"]
-    assert "remaining_topics" in data
-    assert len(data["remaining_topics"]) > 0
+    with patch("app.services.interview.evaluator.InterviewEvaluator.evaluate_response", side_effect=mock_evaluate):
+        # 1. Start Interview
+        response = await client.post(
+            "/api/interview/start",
+            json={"interview_mode": "resume"},
+            headers=headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert "id" in data
+        interview_id = data["id"]
+        assert data["current_topic"] == "Python"
+        assert data["follow_up_count"] == 0
+        assert not data["is_completed"]
+        assert "remaining_topics" in data
+        assert len(data["remaining_topics"]) > 0
 
-    # 2. Get State
-    state_res = await client.get(
-        f"/api/interview/state/{interview_id}", headers=headers
-    )
-    assert state_res.status_code == 200
-    assert state_res.json()["current_topic"] == "Python"
+        # 2. Get State
+        state_res = await client.get(
+            f"/api/interview/state/{interview_id}", headers=headers
+        )
+        assert state_res.status_code == 200
+        assert state_res.json()["current_topic"] == "Python"
 
-    # 3. Answer too short (triggers follow up on same topic)
-    ans_res = await client.post(
-        f"/api/interview/next/{interview_id}",
-        json={"answer": "Short"},
-        headers=headers,
-    )
-    assert ans_res.status_code == 200
-    ans_data = ans_res.json()
-    assert ans_data["current_topic"] == "Python"
-    assert ans_data["follow_up_count"] == 1
-    assert len(ans_data["history"]) == 1
-    assert ans_data["history"][0]["score"] == 0.4
+        # 3. Answer too short (triggers follow up on same topic)
+        ans_res = await client.post(
+            f"/api/interview/next/{interview_id}",
+            json={"answer": "Short"},
+            headers=headers,
+        )
+        assert ans_res.status_code == 200
+        ans_data = ans_res.json()
+        assert ans_data["current_topic"] == "Python"
+        assert ans_data["follow_up_count"] == 1
+        assert len(ans_data["history"]) == 1
+        assert ans_data["history"][0]["score"] == 0.4
 
-    # 4. Answer sufficient (transitions to FastAPI)
-    ans_res2 = await client.post(
-        f"/api/interview/next/{interview_id}",
-        json={
-            "answer": "I have used Python extensively to write clean, asynchronous backend code."
-        },
-        headers=headers,
-    )
-    assert ans_res2.status_code == 200
-    ans_data2 = ans_res2.json()
-    assert ans_data2["current_topic"] == "FastAPI"
-    assert ans_data2["follow_up_count"] == 0
-    assert len(ans_data2["history"]) == 2
-    assert ans_data2["history"][1]["score"] == 0.8
+        # 4. Answer sufficient (transitions to FastAPI)
+        ans_res2 = await client.post(
+            f"/api/interview/next/{interview_id}",
+            json={
+                "answer": "I have used Python extensively to write clean, asynchronous backend code."
+            },
+            headers=headers,
+        )
+        assert ans_res2.status_code == 200
+        ans_data2 = ans_res2.json()
+        assert ans_data2["current_topic"] == "FastAPI"
+        assert ans_data2["follow_up_count"] == 0
+        assert len(ans_data2["history"]) == 2
+        assert ans_data2["history"][1]["score"] == 0.8

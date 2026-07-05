@@ -4,6 +4,13 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
+class GranularScores(BaseModel):
+    communication: float
+    accuracy: float
+    confidence: float
+    completeness: float
+
+
 class InterviewHistoryEntry(BaseModel):
     """Represents a single question and answer exchange within an interview."""
 
@@ -11,6 +18,7 @@ class InterviewHistoryEntry(BaseModel):
     answer: Optional[str] = None
     score: Optional[float] = None
     feedback: Optional[str] = None
+    granular_scores: Optional[GranularScores] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -28,6 +36,7 @@ class InterviewState(BaseModel):
     remaining_time: int = 1800  # Default 30 minutes in seconds
     interview_mode: str = "resume"
     is_completed: bool = False
+    report: Optional[Dict[str, Any]] = None
 
 
 class InterviewStartRequest(BaseModel):
@@ -55,6 +64,7 @@ class InterviewResponse(BaseModel):
     remaining_time: int
     interview_mode: str
     is_completed: bool
+    report: Optional[Dict[str, Any]] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

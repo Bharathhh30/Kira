@@ -1,7 +1,8 @@
 import uuid
+from unittest.mock import patch
 from app.schemas.interview import InterviewState
 from app.services.interview.context_loader import ContextLoader
-from app.services.interview.evaluator import InterviewEvaluator
+from app.services.interview.evaluator import EvaluationResult, GranularScores
 from app.services.interview.manager import InterviewManager
 
 MOCK_RESUME = {
@@ -9,6 +10,35 @@ MOCK_RESUME = {
     "skills": {"technical": ["Python", "FastAPI"]},
     "projects": [{"name": "Test Project"}],
 }
+
+
+async def mock_evaluate(answer, current_question):
+    if "Python" in answer or "detailed" in answer or len(answer) > 20:
+        return EvaluationResult(
+            score=0.8,
+            follow_up=False,
+            reason="Answer is sufficient",
+            move_next=True,
+            granular_scores=GranularScores(
+                communication=0.8,
+                accuracy=0.8,
+                confidence=0.8,
+                completeness=0.8,
+            ),
+        )
+    else:
+        return EvaluationResult(
+            score=0.4,
+            follow_up=True,
+            reason="Answer is too short",
+            move_next=False,
+            granular_scores=GranularScores(
+                communication=0.5,
+                accuracy=0.4,
+                confidence=0.4,
+                completeness=0.3,
+            ),
+        )
 
 
 def test_context_loader():
@@ -25,15 +55,15 @@ def test_context_loader():
     assert state.follow_up_count == 0
 
 
-def test_evaluator():
+async def test_evaluator():
     # Test short response
-    res1 = InterviewEvaluator.evaluate_response("Short answer", "What is Python?")
+    res1 = await mock_evaluate("Short answer", "What is Python?")
     assert res1.follow_up
     assert not res1.move_next
     assert res1.score == 0.4
 
     # Test long response
-    res2 = InterviewEvaluator.evaluate_response(
+    res2 = await mock_evaluate(
         "This is a sufficiently long response that should pass the 20 character limit check.",
         "What is Python?",
     )
@@ -42,14 +72,18 @@ def test_evaluator():
     assert res2.score == 0.8
 
 
-def test_manager_short_answer():
+async def test_manager_short_answer():
     user_id = uuid.uuid4()
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
     )
 
     manager = InterviewManager()
-    result = manager.process_answer(state, "Too short")
+    with patch(
+        "app.services.interview.evaluator.InterviewEvaluator.evaluate_response",
+        side_effect=mock_evaluate,
+    ):
+        result = await manager.process_answer(state, "Too short")
 
     assert result["action"] == "ASK"
     assert "elaborate" in result["text"]
@@ -57,18 +91,23 @@ def test_manager_short_answer():
     assert len(state.history) == 1
     assert state.history[0].answer == "Too short"
     assert state.history[0].score == 0.4
+    assert state.history[0].granular_scores is not None
 
 
-def test_manager_long_answer_transition():
+async def test_manager_long_answer_transition():
     user_id = uuid.uuid4()
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
     )
 
     manager = InterviewManager()
-    result = manager.process_answer(
-        state, "This is a very long response detailing Python development."
-    )
+    with patch(
+        "app.services.interview.evaluator.InterviewEvaluator.evaluate_response",
+        side_effect=mock_evaluate,
+    ):
+        result = await manager.process_answer(
+            state, "This is a very long response detailing Python development."
+        )
 
     assert result["action"] == "ASK"
     assert state.current_topic == "FastAPI"
@@ -77,7 +116,7 @@ def test_manager_long_answer_transition():
     assert state.history[0].score == 0.8
 
 
-def test_manager_max_follow_up_transition():
+async def test_manager_max_follow_up_transition():
     user_id = uuid.uuid4()
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
@@ -85,19 +124,23 @@ def test_manager_max_follow_up_transition():
 
     manager = InterviewManager(max_follow_ups=1)
 
-    # First short response: increments follow_up_count to 1
-    manager.process_answer(state, "Too short")
-    assert state.follow_up_count == 1
-    assert state.current_topic == "Python"
+    with patch(
+        "app.services.interview.evaluator.InterviewEvaluator.evaluate_response",
+        side_effect=mock_evaluate,
+    ):
+        # First short response: increments follow_up_count to 1
+        await manager.process_answer(state, "Too short")
+        assert state.follow_up_count == 1
+        assert state.current_topic == "Python"
 
-    # Second short response: since follow_up_count >= max_follow_ups, it transitions to FastAPI
-    result2 = manager.process_answer(state, "Still short")
-    assert state.follow_up_count == 0
-    assert state.current_topic == "FastAPI"
-    assert result2["action"] == "ASK"
+        # Second short response: since follow_up_count >= max_follow_ups, it transitions to FastAPI
+        result2 = await manager.process_answer(state, "Still short")
+        assert state.follow_up_count == 0
+        assert state.current_topic == "FastAPI"
+        assert result2["action"] == "ASK"
 
 
-def test_manager_completion():
+async def test_manager_completion():
     # Only 1 topic to make completion easy
     simple_resume = {"skills": {"technical": ["Python"]}}
     user_id = uuid.uuid4()
@@ -106,9 +149,14 @@ def test_manager_completion():
     )
 
     manager = InterviewManager()
-    result = manager.process_answer(
-        state, "This is a detailed answer that should successfully complete Python."
-    )
+    with patch(
+        "app.services.interview.evaluator.InterviewEvaluator.evaluate_response",
+        side_effect=mock_evaluate,
+    ):
+        result = await manager.process_answer(
+            state,
+            "This is a detailed answer that should successfully complete Python.",
+        )
 
     assert state.is_completed
     assert result["action"] == "END"

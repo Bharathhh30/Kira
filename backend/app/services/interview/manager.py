@@ -9,7 +9,7 @@ class InterviewManager:
     def __init__(self, max_follow_ups: int = 2):
         self.max_follow_ups = max_follow_ups
 
-    def process_answer(self, state: InterviewState, answer: str) -> Dict[str, Any]:
+    async def process_answer(self, state: InterviewState, answer: str) -> Dict[str, Any]:
         """
         Receives user answer, evaluates it, updates the InterviewState,
         and determines the next action.
@@ -18,7 +18,7 @@ class InterviewManager:
             return {"action": "END", "text": "This interview is already completed."}
 
         # 1. Evaluate the answer
-        evaluation = InterviewEvaluator.evaluate_response(
+        evaluation = await InterviewEvaluator.evaluate_response(
             answer, state.current_question
         )
 
@@ -28,6 +28,7 @@ class InterviewManager:
             answer=answer,
             score=evaluation.score,
             feedback=evaluation.reason,
+            granular_scores=evaluation.granular_scores,
         )
         state.history.append(history_entry)
 

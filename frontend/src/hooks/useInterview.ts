@@ -1,12 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
+export interface GranularScores {
+	communication: number;
+	accuracy: number;
+	confidence: number;
+	completeness: number;
+}
+
 export interface InterviewHistoryEntry {
 	question: string;
 	answer?: string;
 	score?: number;
 	feedback?: string;
 	timestamp: string;
+	granular_scores?: GranularScores;
+}
+
+export interface EvaluationReport {
+	summary: string;
+	strengths: string[];
+	weaknesses: string[];
+	granular_averages: {
+		communication: number;
+		accuracy: number;
+		confidence: number;
+		completeness: number;
+	};
 }
 
 export interface InterviewResponseData {
@@ -20,6 +40,7 @@ export interface InterviewResponseData {
 	remaining_time: number;
 	interview_mode: string;
 	is_completed: boolean;
+	report?: EvaluationReport;
 	created_at: string;
 }
 
