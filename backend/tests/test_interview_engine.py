@@ -12,7 +12,7 @@ MOCK_RESUME = {
 }
 
 
-async def mock_evaluate(answer, current_question):
+async def mock_evaluate(answer, current_question, *args, **kwargs):
     if "Python" in answer or "detailed" in answer or len(answer) > 20:
         return EvaluationResult(
             score=0.8,
@@ -49,8 +49,7 @@ def test_context_loader():
 
     assert isinstance(state, InterviewState)
     assert state.user_id == user_id
-    assert state.current_topic == "Python"
-    assert state.remaining_topics == ["FastAPI", "Project: Test Project"]
+    assert state.current_topic == "Topic Selection"
     assert not state.is_completed
     assert state.follow_up_count == 0
 
@@ -77,6 +76,8 @@ async def test_manager_short_answer():
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
     )
+    state.current_topic = "Python"
+    state.remaining_topics = ["FastAPI"]
 
     manager = InterviewManager()
     with patch(
@@ -99,6 +100,8 @@ async def test_manager_long_answer_transition():
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
     )
+    state.current_topic = "Python"
+    state.remaining_topics = ["FastAPI"]
 
     manager = InterviewManager()
     with patch(
@@ -121,6 +124,8 @@ async def test_manager_max_follow_up_transition():
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=MOCK_RESUME, interview_mode="resume"
     )
+    state.current_topic = "Python"
+    state.remaining_topics = ["FastAPI"]
 
     manager = InterviewManager(max_follow_ups=1)
 
@@ -147,6 +152,8 @@ async def test_manager_completion():
     state = ContextLoader.load_context(
         user_id=user_id, resume_json=simple_resume, interview_mode="resume"
     )
+    state.current_topic = "Python"
+    state.remaining_topics = []
 
     manager = InterviewManager()
     with patch(

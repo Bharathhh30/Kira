@@ -43,6 +43,8 @@ class InterviewStartRequest(BaseModel):
     """Request payload to initiate a new interview session."""
 
     interview_mode: str = "resume"
+    job_description: Optional[str] = None
+    company_name: Optional[str] = None
 
 
 class InterviewAnswerRequest(BaseModel):

@@ -30,11 +30,23 @@ class KiraInterviewAgent(Agent):
         self.user_id = user_id
         self.access_token = create_access_token(subject=user_id)
         self.is_completed = False
-        # Queue used to pass the next question from on_user_turn_completed → llm_node
-        self._response_queue: asyncio.Queue[str] = asyncio.Queue()
         self._session: AgentSession | None = None
+        # Start locked to block user turn processing during agent initialization and first question playout
+        self._is_processing_turn = True
 
         super().__init__(instructions="You are Kira, an AI technical interviewer.")
+
+    def enable_turn_processing(self) -> None:
+        """Unlock turn processing to allow candidate answers."""
+        self._is_processing_turn = False
+        logger.info(
+            "Turn processing enabled: Kira is now listening for candidate response."
+        )
+
+    def disable_turn_processing(self) -> None:
+        """Lock turn processing during speaking or background API requests."""
+        self._is_processing_turn = True
+        logger.info("Turn processing disabled.")
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.access_token}"}
@@ -76,28 +88,40 @@ class KiraInterviewAgent(Agent):
         turn_ctx: llm.ChatContext,
         new_message: llm.ChatMessage,
     ) -> None:
-        """Called after each user turn ends. Submit answer and queue the next question."""
-        user_text = ""
-        if hasattr(new_message, "content"):
-            content = new_message.content
-            if isinstance(content, str):
-                user_text = content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, str):
-                        user_text += part
-
-        if not user_text.strip():
-            logger.warning("Empty user transcript, skipping submission.")
-            self._response_queue.put_nowait("")
+        """Called after each user turn ends. Submit answer and speak the next question."""
+        if self._is_processing_turn:
+            logger.info(
+                "Ignoring user turn callback because agent is currently speaking or processing."
+            )
             return
 
-        logger.info(f"User answered: '{user_text}'")
-        next_question = await self.submit_answer_and_get_next(user_text)
-        logger.info(f"Next question: '{next_question}'")
+        self._is_processing_turn = True
+        try:
+            user_text = ""
+            if hasattr(new_message, "content"):
+                content = new_message.content
+                if isinstance(content, str):
+                    user_text = content
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, str):
+                            user_text += part
 
-        # Put the next question in the queue — llm_node will pick it up
-        self._response_queue.put_nowait(next_question)
+            if not user_text.strip():
+                logger.warning("Empty user transcript, skipping submission.")
+                return
+
+            logger.info(f"User answered: '{user_text}'")
+            next_question = await self.submit_answer_and_get_next(user_text)
+            logger.info(f"Next question: '{next_question}'")
+
+            if self._session:
+                # Speak the question directly and prevent early interruption
+                handle = self._session.say(next_question, allow_interruptions=False)
+                # Wait for the agent to finish speaking before releasing the lock
+                await handle.wait_for_playout()
+        finally:
+            self._is_processing_turn = False
 
     async def llm_node(
         self,
@@ -105,16 +129,9 @@ class KiraInterviewAgent(Agent):
         tools: list,
         model_settings: object,
     ) -> AsyncIterable[llm.ChatChunk | str]:
-        """Wait for the state machine to provide the next question and yield it."""
-        try:
-            # Wait up to 15s for on_user_turn_completed to put the next question
-            next_q = await asyncio.wait_for(self._response_queue.get(), timeout=15.0)
-        except asyncio.TimeoutError:
-            logger.error("Timed out waiting for next question from state machine.")
-            next_q = "I'm sorry, I had a technical issue. Could you please repeat?"
-
-        if next_q:
-            yield next_q
+        """No-op LLM generator as we drive speech explicitly via session.say."""
+        if False:
+            yield ""
 
 
 async def entrypoint(ctx: JobContext):
@@ -159,6 +176,9 @@ async def entrypoint(ctx: JobContext):
         ),
         tts=tts.FallbackAdapter(
             [
+                TTS.from_model_string(
+                    "cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+                ),
                 cartesia.TTS(
                     model="sonic-3",
                     voice="427a8721-3773-4d49-afa4-ee7c439c7bb7",
@@ -172,10 +192,16 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent, room=ctx.room)
     logger.info("AgentSession started in room.")
 
-    # Fetch and speak the first interview question immediately
-    first_question = await agent.get_current_question()
-    logger.info(f"Speaking first question: '{first_question}'")
-    session.say(first_question, allow_interruptions=False)
+    # Fetch and speak the first interview question immediately in a background task
+    # to avoid blocking the LiveKit connection handshake.
+    async def speak_first_question():
+        first_question = await agent.get_current_question()
+        logger.info(f"Speaking first question: '{first_question}'")
+        handle = session.say(first_question, allow_interruptions=False)
+        await handle.wait_for_playout()
+        agent.enable_turn_processing()
+
+    asyncio.create_task(speak_first_question())
 
     # Keep alive until room disconnects or interview completes
     while ctx.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:

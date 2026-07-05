@@ -22,11 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useInterview, useInterviewToken } from "@/hooks/useInterview";
 
-interface VoiceControlsProps {
-	onDisconnect: () => void;
-}
+interface VoiceControlsProps {}
 
-function VoiceControls({ onDisconnect }: VoiceControlsProps) {
+function VoiceControls() {
 	const { localParticipant } = useLocalParticipant();
 	const [isMuted, setIsMuted] = useState(false);
 
@@ -89,15 +87,6 @@ function VoiceControls({ onDisconnect }: VoiceControlsProps) {
 					)}
 					<span>{isMuted ? "Unmute" : "Mute"}</span>
 				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="border-red-250 text-red-650 hover:bg-red-50/50 rounded-lg cursor-pointer text-xs font-semibold"
-					onClick={onDisconnect}
-				>
-					End Voice
-				</Button>
 			</div>
 		</div>
 	);
@@ -107,13 +96,13 @@ export default function Interview() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 
-	const [isVoiceMode, setIsVoiceMode] = useState(false);
+	const [isVoiceMode, setIsVoiceMode] = useState(true);
 	const [answer, setAnswer] = useState("");
 	const [charCount, setCharCount] = useState(0);
 
 	// Poll every 2 seconds when in Voice Mode to display transcripts in real-time
 	const refetchInterval = isVoiceMode ? 2000 : false;
-	const { interview, isLoading, error, submitAnswer } = useInterview(
+	const { interview, isLoading, error, submitAnswer, endInterviewEarly } = useInterview(
 		id,
 		refetchInterval,
 	);
@@ -181,6 +170,19 @@ export default function Interview() {
 		}
 	};
 
+	const handleEndEarly = async () => {
+		const confirmEnd = window.confirm(
+			"Are you sure you want to end this mock interview early? We will evaluate your answers up to this point and generate your performance report dashboard.",
+		);
+		if (!confirmEnd) return;
+
+		try {
+			await endInterviewEarly.mutateAsync();
+		} catch (err) {
+			console.error("Failed to end interview early:", err);
+		}
+	};
+
 	// Calculate average score
 	const scoredHistory = interview.history.filter((h) => h.score !== null);
 	const averageScore =
@@ -199,7 +201,7 @@ export default function Interview() {
 
 	return (
 		<div className="min-h-screen bg-white text-slate-900 flex flex-col font-sans">
-			<Header />
+			{(!isVoiceMode || interview.is_completed) && <Header />}
 
 			{/* Custom Top Dashboard Bar */}
 			<div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -229,6 +231,22 @@ export default function Interview() {
 							{formatTime(interview.remaining_time)}
 						</span>
 					</div>
+					{!interview.is_completed && (
+						<Button
+							variant="outline"
+							size="sm"
+							className="border-red-200 text-red-650 hover:bg-red-50 hover:text-red-750 font-semibold cursor-pointer text-xs flex items-center gap-1 w-fit rounded-lg h-9"
+							onClick={handleEndEarly}
+							disabled={endInterviewEarly.isPending}
+						>
+							{endInterviewEarly.isPending ? (
+								<span className="h-3 w-3 animate-spin rounded-full border border-red-600 border-t-transparent" />
+							) : (
+								<AlertCircle className="h-3.5 w-3.5" />
+							)}
+							<span>End Session</span>
+						</Button>
+					)}
 				</div>
 			</div>
 
@@ -444,6 +462,50 @@ export default function Interview() {
 						</Link>
 					</div>
 				</div>
+			) : isVoiceMode ? (
+				/* Voice-only Immersive Mode */
+				<div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full px-6 py-12 animate-fade-in">
+					<Card className="bg-slate-50 border border-slate-200/80 rounded-3xl p-8 w-full shadow-lg flex flex-col items-center justify-center min-h-[360px] gap-6 relative">
+						{/* Mode details */}
+
+						<div className="text-center flex flex-col items-center gap-2">
+							<span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+								Immersive Voice Interview
+							</span>
+							<h3 className="text-lg font-bold text-slate-900">
+								Speaking with Kira
+							</h3>
+							<p className="text-xs text-slate-500 max-w-sm leading-normal">
+								No visual text feed or roadmap is shown during the voice session to simulate a real-life interview environment. Speak clearly when the waveform is active.
+							</p>
+						</div>
+
+						<div className="w-full">
+							{isLoadingToken ? (
+								<div className="flex flex-col items-center justify-center gap-3 text-slate-500 text-sm">
+									<span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-350 border-t-slate-800" />
+									<span>Connecting to voice room...</span>
+								</div>
+							) : tokenError ? (
+								<div className="text-red-650 text-sm font-semibold text-center">
+									Failed to connect to voice service. Please switch back to text mode.
+								</div>
+							) : tokenData ? (
+								<LiveKitRoom
+									serverUrl={tokenData.server_url}
+									token={tokenData.token}
+									connect={true}
+									audio={true}
+									video={false}
+									onDisconnected={() => setIsVoiceMode(false)}
+								>
+									<RoomAudioRenderer />
+									<VoiceControls />
+								</LiveKitRoom>
+							) : null}
+						</div>
+					</Card>
+				</div>
 			) : (
 				/* Active Grid details */
 				<div className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-4 gap-6 p-6 overflow-hidden">
@@ -602,11 +664,11 @@ export default function Interview() {
 							{isVoiceMode ? (
 								isLoadingToken ? (
 									<div className="p-4 bg-white border-t border-slate-200 flex items-center justify-center gap-2 text-slate-500 text-sm font-medium">
-										<span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" />
+										<span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-350 border-t-slate-800" />
 										<span>Generating voice room credentials...</span>
 									</div>
 								) : tokenError ? (
-									<div className="p-4 bg-white border-t border-slate-200 text-red-600 text-sm font-medium text-center">
+									<div className="p-4 bg-white border-t border-slate-200 text-red-650 text-sm font-medium text-center">
 										Failed to connect to voice service. Please switch back to
 										text mode.
 									</div>
@@ -620,7 +682,7 @@ export default function Interview() {
 										onDisconnected={() => setIsVoiceMode(false)}
 									>
 										<RoomAudioRenderer />
-										<VoiceControls onDisconnect={() => setIsVoiceMode(false)} />
+										<VoiceControls />
 									</LiveKitRoom>
 								) : null
 							) : (

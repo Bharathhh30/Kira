@@ -34,7 +34,10 @@ async def start_interview(
 ):
     """Initiates a new technical mock interview session."""
     return await service.start_interview(
-        user_id=current_user.id, mode=request.interview_mode
+        user_id=current_user.id,
+        mode=request.interview_mode,
+        job_description=request.job_description,
+        company_name=request.company_name,
     )
 
 
@@ -48,6 +51,18 @@ async def process_answer(
     """Processes candidate's response to the active question and updates state."""
     return await service.process_answer(
         interview_id=interview_id, answer=request.answer, user_id=current_user.id
+    )
+
+
+@router.post("/end/{interview_id}", response_model=InterviewResponse)
+async def end_interview_early(
+    interview_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    service: InterviewService = Depends(get_interview_service),
+):
+    """Forces the active mock interview session to complete early and generates the report."""
+    return await service.end_interview_early(
+        interview_id=interview_id, user_id=current_user.id
     )
 
 

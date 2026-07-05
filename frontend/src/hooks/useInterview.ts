@@ -68,11 +68,13 @@ export function useInterview(
 	const startMutation = useMutation<
 		InterviewResponseData,
 		Error,
-		{ mode?: string }
+		{ mode?: string; job_description?: string; company_name?: string }
 	>({
-		mutationFn: async ({ mode = "resume" } = {}) => {
+		mutationFn: async ({ mode = "resume", job_description, company_name } = {}) => {
 			const response = await api.post("/interview/start", {
 				interview_mode: mode,
+				job_description,
+				company_name,
 			});
 			if (!response.ok) {
 				const errorData = await response.json();
@@ -103,6 +105,25 @@ export function useInterview(
 		},
 	});
 
+	const endMutation = useMutation<
+		InterviewResponseData,
+		Error,
+		void
+	>({
+		mutationFn: async () => {
+			if (!interviewId) throw new Error("No active interview session");
+			const response = await api.post(`/interview/end/${interviewId}`);
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.detail || "Failed to end interview early");
+			}
+			return response.json();
+		},
+		onSuccess: (data) => {
+			queryClient.setQueryData(["interview", interviewId], data);
+		},
+	});
+
 	return {
 		interview: interviewQuery.data,
 		isLoading: interviewQuery.isLoading,
@@ -110,6 +131,7 @@ export function useInterview(
 		refetchState: interviewQuery.refetch,
 		startInterview: startMutation,
 		submitAnswer: nextMutation,
+		endInterviewEarly: endMutation,
 	};
 }
 

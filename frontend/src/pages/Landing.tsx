@@ -14,12 +14,19 @@ export default function Landing() {
 	const [isUploading, setIsUploading] = useState(false);
 	const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 	const [uploadError, setUploadError] = useState<string | null>(null);
+	const [activeMode, setActiveMode] = useState<string>("resume");
+	const [jdText, setJdText] = useState("");
+	const [companyName, setCompanyName] = useState("EPAM");
 	const navigate = useNavigate();
 	const { startInterview } = useInterview();
 
 	const handleStartInterview = async () => {
 		try {
-			const session = await startInterview.mutateAsync({ mode: "resume" });
+			const session = await startInterview.mutateAsync({
+				mode: activeMode,
+				job_description: activeMode === "jd" ? jdText : undefined,
+				company_name: activeMode === "company" ? companyName : undefined,
+			});
 			navigate(`/interview/${session.id}`);
 		} catch (err: any) {
 			setUploadError(err.message || "Failed to start interview session.");
@@ -217,27 +224,123 @@ export default function Landing() {
 							</div>
 
 							{/* Card 2: Practice Interview */}
-							<div className="p-6 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between gap-4">
-								<div className="flex flex-col gap-2">
+							<div className="p-6 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between gap-6 md:col-span-1">
+								<div className="flex flex-col gap-3">
 									<h3 className="text-lg font-bold text-slate-900">
-										Adaptive Mock Interviews
+										Mock Interview Customizer
 									</h3>
-									<p className="text-sm text-slate-500 leading-relaxed">
-										Practice voice-interactive tech interviews. The AI
-										dynamically adapts difficulty, probes your code designs, and
-										checks your problem solving steps based on your profile
-										background.
+									<p className="text-xs text-slate-500 leading-normal">
+										Select a practicing mode to customize your adaptive syllabus and start your session.
 									</p>
+
+									{/* Custom tabs */}
+									<div className="flex flex-wrap gap-1.5 mt-2">
+										{[
+											{ id: "resume", label: "Resume-Based" },
+											{ id: "jd", label: "Job Description" },
+											{ id: "company", label: "Company Simulator" },
+											{ id: "coding", label: "Coding Concepts" },
+											{ id: "behavioral", label: "Behavioral Scenario" },
+										].map((tab) => (
+											<button
+												key={tab.id}
+												type="button"
+												onClick={() => {
+													setActiveMode(tab.id);
+												}}
+												className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer border transition-all ${
+													activeMode === tab.id
+														? "bg-slate-900 text-white border-slate-900 shadow-sm"
+														: "bg-white text-slate-600 border-slate-250 hover:bg-slate-100"
+												}`}
+											>
+												{tab.label}
+											</button>
+										))}
+									</div>
+
+									{/* Tab content panel */}
+									<div className="mt-3 bg-white border border-slate-200/80 rounded-xl p-3.5 min-h-[140px] flex flex-col justify-center">
+										{activeMode === "resume" && (
+											<div className="flex flex-col gap-1.5">
+												<span className="text-xs font-semibold text-slate-800">Resume-Based mock</span>
+												<p className="text-[11px] text-slate-500 leading-relaxed">
+													Tailored to your uploaded profile. Questions are dynamically generated from your skills, experience, and projects.
+												</p>
+												{!hasResume && (
+													<span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200/60 rounded px-2 py-0.5 w-fit mt-1">
+														Requires resume upload first
+													</span>
+												)}
+											</div>
+										)}
+
+										{activeMode === "jd" && (
+											<div className="flex flex-col gap-2">
+												<span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+													Target Job Description
+												</span>
+												<textarea
+													className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-slate-300 min-h-[90px] resize-none"
+													placeholder="Paste details of the role to generate custom syllabus topics..."
+													value={jdText}
+													onChange={(e) => setJdText(e.target.value)}
+												/>
+											</div>
+										)}
+
+										{activeMode === "company" && (
+											<div className="flex flex-col gap-2">
+												<span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+													Target Company Preset (Simulator MVP Placeholder)
+												</span>
+												<select
+													className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-300"
+													value={companyName}
+													onChange={(e) => setCompanyName(e.target.value)}
+												>
+													<option value="EPAM">EPAM Simulator (Placeholder Preset)</option>
+													<option value="Google">Google Simulator (Placeholder Preset)</option>
+													<option value="Amazon">Amazon Simulator (Placeholder Preset)</option>
+												</select>
+												<span className="text-[10px] text-slate-400 leading-normal">
+													Select a preset matching top placement syllabus structures.
+												</span>
+											</div>
+										)}
+
+										{activeMode === "coding" && (
+											<div className="flex flex-col gap-1">
+												<span className="text-xs font-semibold text-slate-800">Coding mock</span>
+												<p className="text-[11px] text-slate-500 leading-relaxed">
+													Practice algorithmic complexities, choosing data structures, code optimizations, and design paradigms.
+												</p>
+											</div>
+										)}
+
+										{activeMode === "behavioral" && (
+											<div className="flex flex-col gap-1">
+												<span className="text-xs font-semibold text-slate-800">Behavioral mock</span>
+												<p className="text-[11px] text-slate-500 leading-relaxed">
+													Practice STAR leadership framework, project communication, deadlines, and team collaboration.
+												</p>
+											</div>
+										)}
+									</div>
 								</div>
 								<div>
 									<Button
-										className="w-fit bg-slate-900 text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+										className="w-full bg-slate-900 text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
 										size="sm"
 										onClick={handleStartInterview}
-										disabled={startInterview.isPending || !hasResume}
+										disabled={
+											startInterview.isPending || 
+											(activeMode === "resume" && !hasResume) ||
+											(activeMode === "jd" && !jdText.trim())
+										}
 									>
 										{startInterview.isPending
-											? "Starting..."
+											? "Generating session..."
 											: "Start Mock Session"}
 									</Button>
 								</div>
