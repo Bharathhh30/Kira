@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import uuid
+import time
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from livekit import api
@@ -17,6 +19,11 @@ from app.schemas.interview import (
 from app.services.interview.service import InterviewService
 
 router = APIRouter(prefix="/interview", tags=["interview"])
+
+# In-memory cache to prevent duplicate dispatches in quick succession
+# Room name -> timestamp
+RECENT_DISPATCHES: dict[str, float] = {}
+dispatch_lock = asyncio.Lock()
 
 
 async def get_interview_service(
@@ -66,6 +73,15 @@ async def end_interview_early(
     )
 
 
+@router.get("/list", response_model=list[InterviewResponse])
+async def list_interviews(
+    current_user: User = Depends(get_current_user),
+    service: InterviewService = Depends(get_interview_service),
+):
+    """Retrieves all mock interview sessions for the current user."""
+    return await service.list_interviews(user_id=current_user.id)
+
+
 @router.get("/state/{interview_id}", response_model=InterviewResponse)
 async def get_interview_state(
     interview_id: uuid.UUID,
@@ -84,6 +100,7 @@ _route_logger = logging.getLogger("kira.routes.interview")
 @router.post("/token/{interview_id}", response_model=InterviewTokenResponse)
 async def get_token(
     interview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
     """Generates a signed LiveKit connection token and dispatches the voice agent to the room."""
@@ -95,20 +112,83 @@ async def get_token(
     token.with_name(current_user.name)
     token.with_grants(api.VideoGrants(room_join=True, room=room_name))
 
-    # Explicitly dispatch the agent to the room (ensures re-dispatch after crashes)
-    lk_api = api.LiveKitAPI(
-        url=settings.LIVEKIT_URL,
-        api_key=settings.LIVEKIT_API_KEY,
-        api_secret=settings.LIVEKIT_API_SECRET,
-    )
-    async with lk_api:
-        try:
-            dispatch = await lk_api.agent_dispatch.create_dispatch(
-                api.CreateAgentDispatchRequest(room=room_name, agent_name="")
-            )
-            _route_logger.info(f"Agent dispatched to room {room_name}: {dispatch}")
-        except Exception as e:
-            # Non-fatal — agent may already be running in the room
-            _route_logger.warning(f"Agent dispatch skipped for room {room_name}: {e}")
+    # Fetch interview row with row-level write lock to prevent race conditions
+    from sqlalchemy import select
+    from app.models.interview import Interview
+
+    should_dispatch = False
+    current_time = time.time()
+    try:
+        # with_for_update blocks concurrent transactions from reading this row
+        stmt = select(Interview).where(Interview.id == interview_id).with_for_update()
+        res = await db.execute(stmt)
+        db_interview = res.scalar_one_or_none()
+
+        if db_interview:
+            report_dict = db_interview.report or {}
+            last_dispatched = report_dict.get("agent_dispatched_at", 0.0)
+
+            if current_time - last_dispatched < 15.0:
+                should_dispatch = False
+                _route_logger.info(
+                    f"Agent already recently dispatched in DB for room {room_name}. Skipping dispatch."
+                )
+            else:
+                should_dispatch = True
+                # Record dispatch timestamp in database immediately
+                report_dict["agent_dispatched_at"] = current_time
+                db_interview.report = report_dict
+                await db.commit()
+        else:
+            _route_logger.warning(f"Interview {interview_id} not found in DB.")
+    except Exception as dbe:
+        _route_logger.warning(f"Failed database dispatch synchronization: {dbe}")
+        # Fallback to local memory cache if database lock fails
+        should_dispatch = True
+
+    if should_dispatch:
+        # Check active participants list on LiveKit as a final safeguard
+        lk_api = api.LiveKitAPI(
+            url=settings.LIVEKIT_URL,
+            api_key=settings.LIVEKIT_API_KEY,
+            api_secret=settings.LIVEKIT_API_SECRET,
+        )
+        async with lk_api:
+            try:
+                # Clean up expired dispatches in local cache
+                for r_name in list(RECENT_DISPATCHES.keys()):
+                    if current_time - RECENT_DISPATCHES[r_name] > 15.0:
+                        RECENT_DISPATCHES.pop(r_name, None)
+
+                has_agent = False
+                try:
+                    participants_res = await lk_api.room.list_participants(
+                        api.ListParticipantsRequest(room=room_name)
+                    )
+                    for p in participants_res.participants:
+                        if p.identity.startswith("agent-"):
+                            has_agent = True
+                            break
+                except Exception as le:
+                    _route_logger.warning(
+                        f"Could not check participants list for room {room_name}: {le}"
+                    )
+
+                if not has_agent and room_name not in RECENT_DISPATCHES:
+                    RECENT_DISPATCHES[room_name] = current_time
+                    dispatch = await lk_api.agent_dispatch.create_dispatch(
+                        api.CreateAgentDispatchRequest(room=room_name, agent_name="")
+                    )
+                    _route_logger.info(
+                        f"Agent dispatched to room {room_name}: {dispatch}"
+                    )
+                else:
+                    _route_logger.info(
+                        f"Agent already present or recently dispatched to room {room_name}. Skipping dispatch."
+                    )
+            except Exception as e:
+                _route_logger.warning(
+                    f"Agent dispatch skipped for room {room_name}: {e}"
+                )
 
     return InterviewTokenResponse(token=token.to_jwt(), server_url=settings.LIVEKIT_URL)

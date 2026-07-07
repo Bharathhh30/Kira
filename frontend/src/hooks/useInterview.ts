@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
 
 export interface GranularScores {
 	communication: number;
@@ -34,6 +35,7 @@ export interface InterviewResponseData {
 	user_id: string;
 	current_topic: string | null;
 	remaining_topics: string[];
+	topic_list: string[];
 	current_question: string | null;
 	follow_up_count: number;
 	history: InterviewHistoryEntry[];
@@ -49,6 +51,7 @@ export function useInterview(
 	refetchInterval: number | false = false,
 ) {
 	const queryClient = useQueryClient();
+	const { accessToken } = useAuthStore();
 
 	const interviewQuery = useQuery<InterviewResponseData>({
 		queryKey: ["interview", interviewId],
@@ -61,7 +64,7 @@ export function useInterview(
 			}
 			return response.json();
 		},
-		enabled: !!interviewId,
+		enabled: !!interviewId && !!accessToken,
 		refetchInterval,
 	});
 
@@ -135,19 +138,52 @@ export function useInterview(
 	};
 }
 
+const tokenInflightRequests = new Map<string, Promise<any>>();
+
 export function useInterviewToken(interviewId?: string) {
+	const { accessToken } = useAuthStore();
 	return useQuery<{ token: string; server_url: string }>({
 		queryKey: ["interview-token", interviewId],
 		queryFn: async () => {
 			if (!interviewId) throw new Error("No interview ID provided");
-			const response = await api.post(`/interview/token/${interviewId}`);
+
+			if (tokenInflightRequests.has(interviewId)) {
+				return tokenInflightRequests.get(interviewId);
+			}
+
+			const promise = (async () => {
+				try {
+					const response = await api.post(`/interview/token/${interviewId}`);
+					if (!response.ok) {
+						const errorData = await response.json();
+						throw new Error(errorData.detail || "Failed to fetch LiveKit token");
+					}
+					return response.json();
+				} finally {
+					tokenInflightRequests.delete(interviewId);
+				}
+			})();
+
+			tokenInflightRequests.set(interviewId, promise);
+			return promise;
+		},
+		enabled: !!interviewId && !!accessToken,
+		staleTime: 5 * 60 * 1000,
+	});
+}
+
+export function useInterviews() {
+	const { accessToken } = useAuthStore();
+	return useQuery<InterviewResponseData[]>({
+		queryKey: ["interviews"],
+		queryFn: async () => {
+			const response = await api.get("/interview/list");
 			if (!response.ok) {
 				const errorData = await response.json();
-				throw new Error(errorData.detail || "Failed to fetch LiveKit token");
+				throw new Error(errorData.detail || "Failed to fetch interview history");
 			}
 			return response.json();
 		},
-		enabled: !!interviewId,
-		staleTime: 5 * 60 * 1000,
+		enabled: !!accessToken,
 	});
 }

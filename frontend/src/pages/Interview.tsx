@@ -92,6 +92,24 @@ function VoiceControls() {
 	);
 }
 
+const renderQuestionTextAndCode = (qText: string) => {
+	const hasSnippet = qText.includes("|||");
+	const parts = qText.split("|||");
+	const question = parts[0]?.trim() || qText;
+	const code = hasSnippet ? parts.slice(1).join("|||").trim() : "";
+
+	return (
+		<div className="flex flex-col gap-3 w-full">
+			<p className="whitespace-pre-wrap">{question}</p>
+			{code && (
+				<pre className="text-slate-100 font-mono text-xs leading-relaxed whitespace-pre overflow-auto p-4 bg-slate-950 rounded-xl border border-slate-800 text-left">
+					{code}
+				</pre>
+			)}
+		</div>
+	);
+};
+
 export default function Interview() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
@@ -284,7 +302,7 @@ export default function Interview() {
 					</Card>
 
 					{/* Granular Averages and Strengths/Weaknesses side by side */}
-					{interview.report && (
+					{interview.report && interview.report.granular_averages && (
 						<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 							{/* Skill matrix bars */}
 							<Card className="bg-white border-slate-200 p-6 shadow-sm flex flex-col gap-5">
@@ -385,9 +403,9 @@ export default function Interview() {
 											<span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
 												Question #{index + 1}
 											</span>
-											<p className="text-slate-800 text-sm font-medium leading-relaxed mt-0.5">
-												{turn.question}
-											</p>
+											<div className="text-slate-800 text-sm font-medium leading-relaxed mt-0.5 w-full">
+												{renderQuestionTextAndCode(turn.question)}
+											</div>
 										</div>
 									</div>
 
@@ -464,7 +482,11 @@ export default function Interview() {
 				</div>
 			) : isVoiceMode ? (
 				/* Voice-only Immersive Mode */
-				<div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full px-6 py-12 animate-fade-in">
+				<div className={`flex-1 flex items-center justify-center w-full px-6 py-12 animate-fade-in ${
+					interview?.current_question?.includes("|||")
+						? "max-w-6xl mx-auto grid gap-6 md:grid-cols-2"
+						: "max-w-2xl mx-auto flex flex-col"
+				}`}>
 					<Card className="bg-slate-50 border border-slate-200/80 rounded-3xl p-8 w-full shadow-lg flex flex-col items-center justify-center min-h-[360px] gap-6 relative">
 						{/* Mode details */}
 
@@ -505,6 +527,22 @@ export default function Interview() {
 							) : null}
 						</div>
 					</Card>
+
+					{interview?.current_question?.includes("|||") && (
+						<Card className="bg-slate-950 border border-slate-800 rounded-3xl p-8 w-full shadow-lg min-h-[360px] flex flex-col gap-4 text-left">
+							<div className="flex items-center justify-between border-b border-slate-850 pb-3">
+								<span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+									Reference Code Block
+								</span>
+								<span className="text-[10px] bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-indigo-400 font-bold uppercase tracking-wider font-mono">
+									{interview.current_topic || "Code"}
+								</span>
+							</div>
+							<pre className="text-slate-100 font-mono text-xs leading-relaxed whitespace-pre overflow-auto p-4 bg-slate-900/60 rounded-xl flex-1 border border-slate-900 scrollbar-thin scrollbar-thumb-slate-800">
+								{interview.current_question.split("|||").slice(1).join("|||").trim()}
+							</pre>
+						</Card>
+					)}
 				</div>
 			) : (
 				/* Active Grid details */
@@ -614,8 +652,8 @@ export default function Interview() {
 											<div className="h-9 w-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 flex-shrink-0">
 												<HelpCircle className="h-4.5 w-4.5" />
 											</div>
-											<div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-800 text-sm leading-relaxed shadow-sm">
-												<p>{turn.question}</p>
+											<div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-800 text-sm leading-relaxed shadow-sm w-full">
+												{renderQuestionTextAndCode(turn.question)}
 											</div>
 										</div>
 
@@ -651,8 +689,8 @@ export default function Interview() {
 										<div className="h-9 w-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 flex-shrink-0 animate-pulse">
 											<HelpCircle className="h-4.5 w-4.5" />
 										</div>
-										<div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-800 text-sm leading-relaxed shadow-sm">
-											<p>{interview.current_question}</p>
+										<div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-800 text-sm leading-relaxed shadow-sm w-full">
+											{renderQuestionTextAndCode(interview.current_question)}
 										</div>
 									</div>
 								)}

@@ -25,6 +25,7 @@ class Interview(Base):
     remaining_topics: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    topic_list: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     current_question: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     follow_up_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     history: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)

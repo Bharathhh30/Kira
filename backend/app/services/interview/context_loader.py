@@ -76,6 +76,9 @@ class ContextLoader:
             resume_json=resume_json,
             current_topic=initial_topic,
             remaining_topics=remaining,
+            topic_list=all_topics
+            if (interview_mode != "resume" or custom_topics)
+            else [],
             current_question=initial_question,
             follow_up_count=0,
             interview_mode=interview_mode,

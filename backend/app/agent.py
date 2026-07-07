@@ -89,6 +89,10 @@ class KiraInterviewAgent(Agent):
         new_message: llm.ChatMessage,
     ) -> None:
         """Called after each user turn ends. Submit answer and speak the next question."""
+        if self.is_completed:
+            logger.info("Interview is already completed. Skipping processing.")
+            return
+
         if self._is_processing_turn:
             logger.info(
                 "Ignoring user turn callback because agent is currently speaking or processing."
@@ -117,7 +121,13 @@ class KiraInterviewAgent(Agent):
 
             if self._session:
                 # Speak the question directly and prevent early interruption
-                handle = self._session.say(next_question, allow_interruptions=False)
+                parts = next_question.split("|||")
+                spoken_question = parts[0].strip()
+                if len(parts) > 1 and parts[1].strip():
+                    spoken_question += (
+                        " Please refer to the code snippet displayed on your screen."
+                    )
+                handle = self._session.say(spoken_question, allow_interruptions=False)
                 # Wait for the agent to finish speaking before releasing the lock
                 await handle.wait_for_playout()
         finally:
@@ -137,6 +147,53 @@ class KiraInterviewAgent(Agent):
 async def entrypoint(ctx: JobContext):
     logger.info(f"Connecting room: {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # Wait a brief moment to allow the participant list to sync completely
+    await asyncio.sleep(1.0)
+
+    # Prevent overlapping agent instances by consensus on identity sort order
+    my_identity = ctx.room.local_participant.identity
+    other_participants = [
+        (p.identity, p.name) for p in ctx.room.remote_participants.values()
+    ]
+    logger.info(f"My agent identity: '{my_identity}'")
+    logger.info(f"Other participants in room: {other_participants}")
+
+    other_agents = [
+        p.identity
+        for p in ctx.room.remote_participants.values()
+        if not p.identity.startswith("user-")
+    ]
+    if other_agents:
+        all_agents = sorted([my_identity] + other_agents)
+        logger.info(f"All agents list: {all_agents}")
+        if my_identity != all_agents[0]:
+            logger.warning(
+                f"Another agent ({all_agents[0]}) has priority in room {ctx.room.name}. Exiting to prevent overlap."
+            )
+            return
+        else:
+            # We have priority! Proactively kick out all other ghost agents to prevent overlaps and double voices.
+            from livekit import api as lk_api_mod
+
+            lk_api = lk_api_mod.LiveKitAPI(
+                url=os.getenv("LIVEKIT_URL") or "",
+                api_key=os.getenv("LIVEKIT_API_KEY") or "",
+                api_secret=os.getenv("LIVEKIT_API_SECRET") or "",
+            )
+            async with lk_api:
+                for agent_id in other_agents:
+                    try:
+                        logger.info(
+                            f"Proactively removing ghost agent {agent_id} from room {ctx.room.name}..."
+                        )
+                        await lk_api.room.remove_participant(
+                            lk_api_mod.RoomParticipantIdentity(
+                                room=ctx.room.name, identity=agent_id
+                            )
+                        )
+                    except Exception as re:
+                        logger.warning(f"Failed to remove ghost agent {agent_id}: {re}")
 
     # Wait for candidate participant
     logger.info("Waiting for candidate to join...")
@@ -186,6 +243,10 @@ async def entrypoint(ctx: JobContext):
                 TTS.from_model_string("deepgram/aura-asteria-en"),
             ]
         ),
+        min_endpointing_delay=2.0,
+        max_endpointing_delay=4.0,
+        false_interruption_timeout=1.5,
+        min_interruption_duration=1.0,
     )
     agent._session = session
 
@@ -197,7 +258,13 @@ async def entrypoint(ctx: JobContext):
     async def speak_first_question():
         first_question = await agent.get_current_question()
         logger.info(f"Speaking first question: '{first_question}'")
-        handle = session.say(first_question, allow_interruptions=False)
+        parts = first_question.split("|||")
+        spoken_question = parts[0].strip()
+        if len(parts) > 1 and parts[1].strip():
+            spoken_question += (
+                " Please refer to the code snippet displayed on your screen."
+            )
+        handle = session.say(spoken_question, allow_interruptions=False)
         await handle.wait_for_playout()
         agent.enable_turn_processing()
 

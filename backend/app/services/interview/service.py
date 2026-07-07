@@ -120,6 +120,7 @@ class InterviewService:
             remaining_time=initial_state.remaining_time,
             interview_mode=initial_state.interview_mode,
             is_completed=initial_state.is_completed,
+            topic_list=initial_state.topic_list,
         )
 
         return await self.interview_repo.create(db_interview)
@@ -177,9 +178,10 @@ class InterviewService:
         await manager.process_answer(state, answer)
 
         # 5. Generate final report if completed
-        report_data = db_interview.report
-        if state.is_completed and not report_data:
-            report_data = await self.generate_final_report(state)
+        report_data = dict(db_interview.report) if db_interview.report else {}
+        if state.is_completed and "summary" not in report_data:
+            generated = await self.generate_final_report(state)
+            report_data.update(generated)
 
         # 6. Map updated fields back to DB
         updated_fields = {
@@ -191,6 +193,7 @@ class InterviewService:
             "remaining_time": state.remaining_time,
             "is_completed": state.is_completed,
             "report": report_data,
+            "topic_list": state.topic_list,
         }
 
         return await self.interview_repo.update(db_interview, updated_fields)
@@ -320,6 +323,10 @@ class InterviewService:
         if db_interview.user_id != user_id:
             raise HTTPException(status_code=403, detail="Access denied.")
         return db_interview
+
+    async def list_interviews(self, user_id: uuid.UUID) -> list[Interview]:
+        """Retrieves all mock interview sessions for a specific user."""
+        return await self.interview_repo.get_by_user_id(user_id)
 
     async def end_interview_early(
         self, interview_id: uuid.UUID, user_id: uuid.UUID

@@ -37,6 +37,7 @@ class InterviewManager:
 
             state.current_topic = chosen_tech
             state.remaining_topics = topics[1:] if len(topics) > 1 else []
+            state.topic_list = list(topics)
             state.follow_up_count = 0
             state.current_question = (
                 f"Great! Let's focus on {chosen_tech} today. "
@@ -116,11 +117,22 @@ class InterviewManager:
             state.follow_up_count = 0
             if state.remaining_topics:
                 next_topic = state.remaining_topics.pop(0)
+
+                # Dynamically generate a graceful, personalized topic transition
+                transition_question = evaluation.transition_question
+                if not transition_question or transition_question.strip().startswith(
+                    "Let's move on"
+                ):
+                    transition_question = (
+                        await InterviewEvaluator.generate_graceful_transition(
+                            current_topic=state.current_topic or "",
+                            next_topic=next_topic,
+                            last_answer=answer,
+                        )
+                    )
+
                 state.current_topic = next_topic
-                state.current_question = (
-                    evaluation.transition_question
-                    or f"Let's move on. Can you tell me about your experience or skills related to {next_topic}?"
-                )
+                state.current_question = transition_question
                 action = "ASK"
             else:
                 # No more topics, end the interview

@@ -43,6 +43,7 @@ def setup_test_db() -> str:
         # Create tables
         test_engine = create_async_engine(test_db_url, poolclass=NullPool)
         async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         await test_engine.dispose()
 

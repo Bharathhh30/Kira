@@ -50,7 +50,7 @@ class InterviewEvaluator:
 
         prompt = (
             "You are an expert technical interviewer evaluating a candidate's response to a question.\n"
-            "The candidate is a college student or recent graduate looking for entry-level positions or internships, so evaluate them accordingly. "
+            "The candidate is a college student looking for entry-level positions or internships, so evaluate them accordingly. "
             "Focus on their core understanding of programming fundamentals, logical reasoning, and academic/personal project experience rather than enterprise industry standards.\n\n"
             f"Question: {current_question}\n"
             f"Candidate's Answer: {answer}\n\n"
@@ -71,7 +71,9 @@ class InterviewEvaluator:
             "2. If `action` is `FOLLOW_UP`, generate a dynamic, highly contextual technical follow-up question (`follow_up_question`) to probe on the candidate's answer. The question should follow the natural flow of conversation, ask about specific technical concepts they mentioned or missed, and help them expand. "
             "Since the candidate is a student/recent graduate, tailor the question to academic concepts, personal projects, or fundamental design patterns they might have encountered, avoiding industry-heavy enterprise scenarios. "
             "DO NOT use generic phrases like 'Could you please elaborate' or 'tell me more'. Ask a direct technical follow-up question instead.\n"
-            f"3. If `action` is `TRANSITION` or `SKIP`, generate a transitional question (`transition_question`) to introduce the next topic. If a next topic is provided (next topic: '{next_topic or ''}'), bridge the conversation to it naturally, focusing on how they might apply Y in projects or their coursework (e.g. 'Great explanation of X. Let's move on to Y. How have you used Y in your coursework or personal projects?'). If no next topic is provided, generate a final concluding sentence.\n\n"
+            f"3. If `action` is `TRANSITION` or `SKIP`, generate a transitional question (`transition_question`) to introduce the next topic. If a next topic is provided (next topic: '{next_topic or ''}'), bridge the conversation to it naturally, focusing on how they might apply Y in projects or their coursework (e.g. 'Great explanation of X. Let's move on to Y. How have you used Y in your coursework or personal projects?'). If no next topic is provided, generate a final concluding sentence.\n"
+            "4. For technical follow-up (`follow_up_question`) or transition (`transition_question`) questions, if it makes sense to have the candidate review, debug, optimize, or predict the output of a code snippet, you can append a short code block to the question using a `|||` separator (e.g. 'Looking at the `mystery` function in the snippet, what will it return for x=5, and how would you optimize it? ||| def mystery(x):\n  return x * 2'). Place the question text BEFORE the `|||` and the raw code snippet AFTER the `|||`. Only do this when highly relevant for technical assessment, and keep snippets under 10 lines of clean code. "
+            "CRITICAL: If a code snippet is generated, the question text MUST explicitly reference it, using phrases like 'Refer to the code snippet on the screen...', 'Looking at the code block...', or mentioning specific function/variable names from the snippet. The question and code block MUST be tightly interlinked.\n\n"
             "Provide scores from 0.0 to 1.0 (float) for each of the following:\n"
             "- `communication`: clarity, structure, and verbal articulation.\n"
             "- `accuracy`: technical correctness and truth of facts.\n"
@@ -232,9 +234,11 @@ class InterviewEvaluator:
         fallback_tech = "Python"
         fallback_topics = [
             "Language Fundamentals",
-            "Concurrency & Async",
-            "Object-Oriented Design",
-            "Memory Management",
+            "Data Structures & Collections",
+            "Object-Oriented Programming",
+            "Concurrency & Multithreading",
+            "Memory Management & Garbage Collection",
+            "Testing & Debugging Practices",
         ]
 
         if not api_key:
@@ -245,14 +249,14 @@ class InterviewEvaluator:
             "The candidate was asked which programming language or technology they want to focus on today.\n"
             f'Candidate\'s Answer: "{answer}"\n'
             f"Candidate's Resume JSON: {json.dumps(resume_json.get('skills', {}))}\n\n"
-            "Identify the single chosen technology/programming language, and generate 4 core subtopics "
-            "suitable for a student/entry-level developer mock interview (e.g., Python: ['Syntax & Basics', 'Data Structures & Algorithms', 'Functions & OOP', 'Common Libraries & Modules']). "
+            "Identify the single chosen technology/programming language, and generate 6 core subtopics "
+            "suitable for a student/entry-level developer mock interview (e.g., Python: ['Syntax & Basics', 'Data Structures & Collections', 'OOP & Classes', 'Concurrency & Threads', 'Memory & GC', 'Testing & Exceptions']). "
             "Focus on core concepts, algorithms, structures, and practical application in personal or academic projects rather than enterprise-level production architecture.\n"
             "Keep the topic names short and concise.\n\n"
             "Return a valid JSON object matching this structure:\n"
             "{\n"
             '  "technology": "Name of Technology",\n'
-            '  "subtopics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4"]\n'
+            '  "subtopics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4", "Topic 5", "Topic 6"]\n'
             "}"
         )
 
@@ -286,3 +290,57 @@ class InterviewEvaluator:
                 )
 
         return fallback_tech, fallback_topics
+
+    @staticmethod
+    async def generate_graceful_transition(
+        current_topic: str,
+        next_topic: str,
+        last_answer: str,
+    ) -> str:
+        """
+        Calls Gemini to generate a graceful conversational transition from the current topic
+        to the next topic, briefly acknowledging the candidate's last response.
+        """
+        api_key = settings.GEMINI_API_KEY
+        fallback_msg = f"Let's move on. Can you tell me about your experience or skills related to {next_topic}?"
+        if not api_key:
+            return fallback_msg
+
+        models = [settings.GEMINI_MODEL, "gemini-2.5-flash"]
+        if settings.GEMINI_MODEL not in models:
+            models.insert(0, settings.GEMINI_MODEL)
+
+        prompt = (
+            "You are Kira, an expert technical voice interviewer.\n"
+            f"You are transitioning the conversation from the topic '{current_topic}' to the next topic '{next_topic}'.\n"
+            f"The candidate's last response about '{current_topic}' was: '{last_answer}'\n\n"
+            "Generate a graceful, natural voice transition statement and introductory question for the new topic.\n"
+            "First, briefly acknowledge the candidate's previous response in a polite, conversational manner (e.g., 'Nice explanation', 'That makes sense', 'That's a good summary of Y').\n"
+            "Then, introduce Y ('{next_topic}') and ask them how they have used or learned Y in their projects or coursework.\n"
+            "Keep the entire response extremely concise (under 2 sentences), natural for text-to-speech, and warm."
+        )
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "text/plain"},
+        }
+
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    response = await client.post(url, json=payload)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        raw_text = res_json["candidates"][0]["content"]["parts"][0][
+                            "text"
+                        ]
+                        cleaned = raw_text.strip()
+                        if cleaned:
+                            return cleaned
+            except Exception as e:
+                logger.warning(
+                    f"Failed to generate graceful transition with {model}: {e}"
+                )
+
+        return fallback_msg

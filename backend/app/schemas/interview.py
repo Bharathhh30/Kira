@@ -30,6 +30,7 @@ class InterviewState(BaseModel):
     resume_json: Dict[str, Any]
     current_topic: Optional[str] = None
     remaining_topics: List[str] = Field(default_factory=list)
+    topic_list: List[str] = Field(default_factory=list)
     current_question: Optional[str] = None
     follow_up_count: int = 0
     history: List[InterviewHistoryEntry] = Field(default_factory=list)
@@ -60,6 +61,7 @@ class InterviewResponse(BaseModel):
     user_id: uuid.UUID
     current_topic: Optional[str] = None
     remaining_topics: List[str] = []
+    topic_list: List[str] = []
     current_question: Optional[str] = None
     follow_up_count: int
     history: List[InterviewHistoryEntry] = []

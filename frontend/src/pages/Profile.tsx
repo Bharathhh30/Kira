@@ -91,6 +91,7 @@ export default function Profile() {
 			}
 			return res.json();
 		},
+		enabled: !!user,
 	});
 
 	return (
