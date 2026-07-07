@@ -22,8 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useInterview, useInterviewToken } from "@/hooks/useInterview";
 
-interface VoiceControlsProps {}
-
 function VoiceControls() {
 	const { localParticipant } = useLocalParticipant();
 	const [isMuted, setIsMuted] = useState(false);
