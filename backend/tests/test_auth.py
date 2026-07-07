@@ -1,4 +1,5 @@
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def test_register_user(client: AsyncClient):
@@ -240,7 +241,7 @@ async def test_get_resume_not_found(client: AsyncClient):
     assert "No resume has been uploaded yet." in response.json()["detail"]
 
 
-async def test_get_resume_success(client: AsyncClient):
+async def test_get_resume_success(client: AsyncClient, db_session: AsyncSession):
     # Register & Login
     await client.post(
         "/api/auth/register",
@@ -257,28 +258,26 @@ async def test_get_resume_success(client: AsyncClient):
     access_token = login_resp.json()["access_token"]
 
     # Insert a resume record directly in the DB
-    from app.core.database import async_session_maker
     from app.models.user import User
     from app.models.resume import Resume
     from sqlalchemy import select
 
-    async with async_session_maker() as session:
-        result = await session.execute(
-            select(User).filter_by(email="resume@example.com")
-        )
-        user = result.scalar_one()
+    result = await db_session.execute(
+        select(User).filter_by(email="resume@example.com")
+    )
+    user = result.scalar_one()
 
-        resume = Resume(
-            user_id=user.id,
-            resume_json={
-                "personal": {
-                    "name": "Resume User",
-                    "email": "resume@example.com",
-                }
-            },
-        )
-        session.add(resume)
-        await session.commit()
+    resume = Resume(
+        user_id=user.id,
+        resume_json={
+            "personal": {
+                "name": "Resume User",
+                "email": "resume@example.com",
+            }
+        },
+    )
+    db_session.add(resume)
+    await db_session.commit()
 
     # Query GET /api/auth/resume
     response = await client.get(

@@ -30,5 +30,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = Field(default="")
     GEMINI_MODEL: str = Field(default="gemini-2.5-flash")
 
+    # LiveKit
+    LIVEKIT_URL: str = Field(default="")
+    LIVEKIT_API_KEY: str = Field(default="")
+    LIVEKIT_API_SECRET: str = Field(default="")
+
+    # Third Party APIs
+    ASSEMBLYAI_API_KEY: str = Field(default="")
+    CARTESIA_API_KEY: str = Field(default="")
+
 
 settings = Settings()
